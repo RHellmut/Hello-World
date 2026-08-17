@@ -63,7 +63,7 @@ RUECKLAGE_SONDEREIGENTUM_QM = 1.0    # EUR je qm und Monat
 # --- Haushaltsrechnung --------------------------------------------------
 # Monatliches Nettohaushaltseinkommen. None => es werden nur die
 # Schwellenwerte ausgewiesen, ohne konkrete Belastungsquote.
-NETTOEINKOMMEN_MONAT = None
+NETTOEINKOMMEN_MONAT = 7_900.0
 
 # --- Vergleichsszenarien ------------------------------------------------
 TILGUNGSVARIANTEN = [0.020, 0.025, 0.030, 0.035, 0.040]
@@ -559,28 +559,37 @@ def teil_varianten():
     inhalt = []
     inhalt.append(abschnitt("5 · Was andere Tilgungssätze bedeuten"))
 
+    # Ist das Einkommen bekannt, wird die Belastungsquote je Variante
+    # mitgefuehrt. Genau daran entscheidet sich, was die Bank mitmacht.
+    mit_quote = bool(NETTOEINKOMMEN_MONAT)
+
     zeilen, markiere = [], None
     for i, t in enumerate(TILGUNGSVARIANTEN, start=1):
         k = kennzahlen(DARLEHEN, SOLLZINS, t, ZINSBINDUNG_JAHRE)
         if abs(t - ANFANGSTILGUNG) < 1e-9:
             markiere = i
-        zeilen.append([
-            prozent(t, 1),
-            eur(k["rate"], 2),
-            eur(k["rate"] + HAUSGELD_MONAT + GRUNDSTEUER_MONAT, 2),
+        fest = k["rate"] + HAUSGELD_MONAT + GRUNDSTEUER_MONAT
+        zeile = [prozent(t, 1), eur(k["rate"], 2), eur(fest, 2)]
+        if mit_quote:
+            zeile.append(prozent(fest / NETTOEINKOMMEN_MONAT, 1))
+        zeile += [
             dauer(k["laufzeit_monate"]),
             eur(k["restschuld_bindung"]),
             eur(k["zinsen_gesamt"]),
-        ])
+        ]
+        zeilen.append(zeile)
 
-    breiten = [
-        INHALTSBREITE * 0.11, INHALTSBREITE * 0.155, INHALTSBREITE * 0.175,
-        INHALTSBREITE * 0.20, INHALTSBREITE * 0.175, INHALTSBREITE * 0.185,
-    ]
+    kopf = ["Tilgung", "Bankrate", "Feste Kosten"]
+    anteile = [0.10, 0.145, 0.155]
+    if mit_quote:
+        kopf.append("Quote")
+        anteile.append(0.105)
+    kopf += ["Schuldenfrei nach", f"Rest n. {ZINSBINDUNG_JAHRE} J.",
+             "Zinsen gesamt"]
+    anteile += ([0.175, 0.15, 0.17] if mit_quote else [0.20, 0.175, 0.185])
+
     inhalt.append(matrixtabelle(
-        ["Tilgung", "Bankrate", "Feste Kosten",
-         "Schuldenfrei nach", f"Rest n. {ZINSBINDUNG_JAHRE} J.", "Zinsen gesamt"],
-        zeilen, breiten, markiere=markiere,
+        kopf, zeilen, [INHALTSBREITE * a for a in anteile], markiere=markiere,
     ))
     inhalt.append(Spacer(1, 5))
 
@@ -619,6 +628,29 @@ def teil_machbarkeit():
                       "40-Prozent-Grenze. Rechnen Sie mit Rückfragen, "
                       "Zinsaufschlägen oder der Forderung nach mehr "
                       "Eigenkapital.")
+            # Welche geringere Tilgung bringt die Quote unter 40 %?
+            entlastung = [
+                t for t in sorted(TILGUNGSVARIANTEN, reverse=True)
+                if t < ANFANGSTILGUNG
+                and (annuitaet_monatlich(DARLEHEN, SOLLZINS, t)
+                     + HAUSGELD_MONAT + GRUNDSTEUER_MONAT)
+                / NETTOEINKOMMEN_MONAT <= 0.40
+            ]
+            if entlastung:
+                t = entlastung[0]
+                k = kennzahlen(DARLEHEN, SOLLZINS, t, ZINSBINDUNG_JAHRE)
+                fest = k["rate"] + HAUSGELD_MONAT + GRUNDSTEUER_MONAT
+                urteil += (
+                    f" Der kürzeste Weg unter diese Grenze ist eine "
+                    f"Anfangstilgung von {prozent(t, 1)}: Die Rate sinkt "
+                    f"auf {eur(k['rate'], 2)}, die Quote auf "
+                    f"{prozent(fest / NETTOEINKOMMEN_MONAT, 1)}. Sie "
+                    f"zahlen dann {dauer(k['laufzeit_monate'])} statt "
+                    f"{dauer(ERG['laufzeit_monate'])} und insgesamt "
+                    f"{eur(k['zinsen_gesamt'] - ERG['zinsen_gesamt'])} mehr "
+                    "Zinsen – erkaufen sich aber Spielraum in der "
+                    "Kreditzusage. Ein Sondertilgungsrecht holt einen Teil "
+                    "davon zurück, ohne die Rate zu erhöhen.")
 
         inhalt.append(wertetabelle(
             [
