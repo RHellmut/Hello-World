@@ -17,6 +17,8 @@ Aendert sich z. B. der Zinssatz, genuegt eine Zeile und ein erneuter Lauf:
     python3 immobilienfinanzierung.py
 """
 
+import sys
+
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
@@ -36,21 +38,63 @@ from reportlab.platypus import (
 #  KONFIGURATION - hier alle Parameter anpassen
 # ═══════════════════════════════════════════════════════════════════════════
 
-# --- Objekt -------------------------------------------------------------
-OBJEKT_ADRESSE = "Waldburgstrasse 153b, 70563 Stuttgart-Vaihingen"
-OBJEKT_BESCHREIBUNG = "4 Zimmer, Erdgeschoss, Terrasse und Garten"
-WOHNFLAECHE_QM = 93.0
-GARTENFLAECHE_QM = 191.0
-ENERGIESTANDARD = "Effizienzhaus 55 EE"
+# --- Objektprofile ------------------------------------------------------
+# Je Immobilie ein Eintrag. Die Auswahl erfolgt ueber AKTIVES_OBJEKT oder
+# als Argument auf der Kommandozeile:
+#
+#     python3 immobilienfinanzierung.py viereichenweg
+#
+OBJEKTE = {
+    "waldburgstrasse": {
+        "adresse": "Waldburgstrasse 153b, 70563 Stuttgart-Vaihingen",
+        "beschreibung": "4 Zimmer, Erdgeschoss, Terrasse und Garten",
+        "merkmale": "191 m² Garten · Neubau · Effizienzhaus 55 EE",
+        "wohnflaeche": 93.0,
+        "kaufpreis_wohnung": 795_000.0,      # inkl. Einbaukueche
+        "kaufpreis_stellplatz": 32_500.0,    # Tiefgaragen-Stellplatz
+        "stellplatz_bezeichnung": "Tiefgaragen-Stellplatz",
+        "maklerprovision_satz": 0.000,
+        "provision_hinweis": "keine Käuferprovision laut Exposé",
+        "einbaukueche_wert": 25_000.0,       # fuer die Puffer-Betrachtung
+        "hausgeld": 346.0,
+        "grundsteuer_jahr": 900.0,
+        "grundsteuer_herleitung": "500 bis 600 €",
+        "ruecklage_qm": 1.0,
+        "ruecklage_begruendung": (
+            "Bei einem Neubau dieses Standards fällt in den ersten acht bis "
+            "zehn Jahren praktisch nichts an; danach greift der Ansatz."),
+        "pdf": "Finanzierung_Waldburgstrasse_153b.pdf",
+    },
+    "viereichenweg": {
+        "adresse": "Viereichenweg 31, 70569 Stuttgart-Vaihingen",
+        "beschreibung": "3 Zimmer, Dachgeschoss, Garage und Außenstellplatz",
+        "merkmale": ("Baujahr 1986 · Bestand, teil-/vollrenoviert · "
+                     "Energieklasse E, 130 kWh/(m²·a), Gas"),
+        "wohnflaeche": 77.0,
+        "kaufpreis_wohnung": 370_000.0,      # Garage und Stellplatz enthalten
+        "kaufpreis_stellplatz": 0.0,
+        "stellplatz_bezeichnung": "Garage und Außenstellplatz (im Preis enthalten)",
+        "maklerprovision_satz": 0.0357,      # 3,57 % inkl. ges. MwSt.
+        "provision_hinweis": "Käuferprovision 3,57 % inkl. ges. MwSt.",
+        "einbaukueche_wert": 0.0,
+        "hausgeld": 546.0,
+        "grundsteuer_jahr": 600.0,
+        "grundsteuer_herleitung": "250 bis 350 €",
+        "ruecklage_qm": 1.5,
+        "ruecklage_begruendung": (
+            "Für ein Gebäude von 1986 mit Energieklasse E ist der Ansatz von "
+            "1,00 € je m² zu knapp. Fenster aus Holz/Isolierglas und ein "
+            "Wärmeerzeuger von 2014 stehen in absehbarer Zeit zur Erneuerung "
+            "an; 1,50 € je m² ist hier die vorsichtige Untergrenze."),
+        "pdf": "Finanzierung_Viereichenweg_31.pdf",
+    },
+}
 
-# --- Kaufpreis ----------------------------------------------------------
-KAUFPREIS_WOHNUNG = 795_000.0        # inkl. Einbaukueche
-KAUFPREIS_STELLPLATZ = 32_500.0      # Tiefgaragen-Stellplatz
+AKTIVES_OBJEKT = "viereichenweg"
 
 # --- Erwerbsnebenkosten -------------------------------------------------
 GRUNDERWERBSTEUER_SATZ = 0.050       # Baden-Wuerttemberg
 NOTAR_GRUNDBUCH_SATZ = 0.020         # oberer Rand der Spanne 1,5 bis 2,0 %
-MAKLERPROVISION_SATZ = 0.000         # laut Expose keine Kaeuferprovision
 
 # --- Finanzierungsnebenkosten -------------------------------------------
 # Diese Posten fallen zusaetzlich zum Kaufpreis an und erhoehen den
@@ -69,10 +113,7 @@ ZINSBINDUNG_JAHRE = 20
 SONDERTILGUNG_JAHR = 0.0             # bewusst ohne Sondertilgung gerechnet
 
 # --- Laufende Kosten ----------------------------------------------------
-HAUSGELD_MONAT = 346.0               # laut Expose
-GRUNDSTEUER_JAHR = 900.0             # konservativ, Herleitung ergibt ca. 500
 KONTOFUEHRUNG_MONAT = 3.0            # laut BGH unzulaessig, vorsorglich angesetzt
-RUECKLAGE_SONDEREIGENTUM_QM = 1.0    # EUR je qm und Monat
 
 # --- Haushaltsrechnung --------------------------------------------------
 # Monatliches Nettohaushaltseinkommen. None => es werden nur die
@@ -82,8 +123,10 @@ NETTOEINKOMMEN_MONAT = 7_900.0
 # --- Vergleichsszenarien ------------------------------------------------
 TILGUNGSVARIANTEN = [0.020, 0.025, 0.030, 0.035, 0.040]
 
-# --- Ausgabe ------------------------------------------------------------
-PDF_DATEI = "Finanzierung_Waldburgstrasse_153b.pdf"
+# --- Sonstiges ----------------------------------------------------------
+# Unterhalb dieser Summe vergeben Banken in aller Regel keine
+# Baufinanzierung mehr - der Fall wird im PDF ausdruecklich benannt.
+MINDESTDARLEHEN = 50_000.0
 STAND = "17. August 2026"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -205,6 +248,32 @@ def darlehensbedarf(basis, quotenkosten, genauigkeit=1e-9, max_schritte=200):
 # ═══════════════════════════════════════════════════════════════════════════
 #  ABLEITUNG DER GRUNDGROESSEN
 # ═══════════════════════════════════════════════════════════════════════════
+
+if len(sys.argv) > 1:
+    if sys.argv[1] not in OBJEKTE:
+        raise SystemExit(
+            f"Unbekanntes Objekt {sys.argv[1]!r}. "
+            f"Verfügbar: {', '.join(OBJEKTE)}")
+    AKTIVES_OBJEKT = sys.argv[1]
+
+OBJEKT = OBJEKTE[AKTIVES_OBJEKT]
+
+OBJEKT_ADRESSE = OBJEKT["adresse"]
+OBJEKT_BESCHREIBUNG = OBJEKT["beschreibung"]
+OBJEKT_MERKMALE = OBJEKT["merkmale"]
+WOHNFLAECHE_QM = OBJEKT["wohnflaeche"]
+KAUFPREIS_WOHNUNG = OBJEKT["kaufpreis_wohnung"]
+KAUFPREIS_STELLPLATZ = OBJEKT["kaufpreis_stellplatz"]
+STELLPLATZ_BEZEICHNUNG = OBJEKT["stellplatz_bezeichnung"]
+MAKLERPROVISION_SATZ = OBJEKT["maklerprovision_satz"]
+PROVISION_HINWEIS = OBJEKT["provision_hinweis"]
+EINBAUKUECHE_WERT = OBJEKT["einbaukueche_wert"]
+HAUSGELD_MONAT = OBJEKT["hausgeld"]
+GRUNDSTEUER_JAHR = OBJEKT["grundsteuer_jahr"]
+GRUNDSTEUER_HERLEITUNG = OBJEKT["grundsteuer_herleitung"]
+RUECKLAGE_SONDEREIGENTUM_QM = OBJEKT["ruecklage_qm"]
+RUECKLAGE_BEGRUENDUNG = OBJEKT["ruecklage_begruendung"]
+PDF_DATEI = OBJEKT["pdf"]
 
 KAUFPREIS_GESAMT = KAUFPREIS_WOHNUNG + KAUFPREIS_STELLPLATZ
 GRUNDERWERBSTEUER = KAUFPREIS_GESAMT * GRUNDERWERBSTEUER_SATZ
@@ -506,8 +575,7 @@ def kopf_und_fuss(canvas, doc):
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(MITTELGRAU)
     canvas.drawString(RAND_SEITLICH, oben + 5,
-                      "FINANZIERUNGSÜBERSICHT · WALDBURGSTRASSE 153B, "
-                      "STUTTGART-VAIHINGEN")
+                      f"FINANZIERUNGSÜBERSICHT · {OBJEKT_ADRESSE.upper()}")
     canvas.drawRightString(SEITE[0] - RAND_SEITLICH, oben + 5,
                            f"Stand {STAND}")
 
@@ -531,8 +599,7 @@ def teil_kopf():
         Paragraph("Finanzierung Ihrer Eigentumswohnung", S_TITEL),
         Paragraph(
             f"{OBJEKT_ADRESSE} · {OBJEKT_BESCHREIBUNG} · "
-            f"{zahl(WOHNFLAECHE_QM, 0)} m² Wohnfläche · "
-            f"{zahl(GARTENFLAECHE_QM, 0)} m² Garten · {ENERGIESTANDARD}",
+            f"{zahl(WOHNFLAECHE_QM, 0)} m² Wohnfläche · {OBJEKT_MERKMALE}",
             S_UNTERTITEL),
         Spacer(1, 14),
         herobox(),
@@ -542,23 +609,27 @@ def teil_kopf():
 
 def teil_kaufpreis():
     lb, _ = spaltenbreiten(0.60)
-    tabelle = wertetabelle(
-        [
-            ("Kaufpreis Wohnung inkl. Einbauküche", eur(KAUFPREIS_WOHNUNG)),
-            ("Tiefgaragen-Stellplatz", eur(KAUFPREIS_STELLPLATZ)),
-            ("<b>Kaufpreis gesamt</b>", eur(KAUFPREIS_GESAMT)),
-            (f"Grunderwerbsteuer Baden-Württemberg "
-             f"({prozent(GRUNDERWERBSTEUER_SATZ, 1)})", eur(GRUNDERWERBSTEUER)),
-            (f"Notar und Grundbuchamt ({prozent(NOTAR_GRUNDBUCH_SATZ, 1)})",
-             eur(NOTAR_GRUNDBUCH)),
-            ("Maklerprovision (keine Käuferprovision laut Exposé)",
-             eur(MAKLERPROVISION)),
-            (f"<b>Erwerbsnebenkosten</b> "
-             f"({prozent(ERWERBSNEBENKOSTEN_QUOTE, 1)} vom Kaufpreis)",
-             eur(ERWERBSNEBENKOSTEN)),
-        ],
-        lb, hervorheben=[2, 6],
-    )
+
+    zeilen = [("Kaufpreis Wohnung", eur(KAUFPREIS_WOHNUNG))]
+    hervor = []
+    if KAUFPREIS_STELLPLATZ:
+        zeilen.append((STELLPLATZ_BEZEICHNUNG, eur(KAUFPREIS_STELLPLATZ)))
+        zeilen.append(("<b>Kaufpreis gesamt</b>", eur(KAUFPREIS_GESAMT)))
+        hervor.append(len(zeilen) - 1)
+    else:
+        zeilen.append((STELLPLATZ_BEZEICHNUNG, "–"))
+    zeilen += [
+        (f"Grunderwerbsteuer Baden-Württemberg "
+         f"({prozent(GRUNDERWERBSTEUER_SATZ, 1)})", eur(GRUNDERWERBSTEUER)),
+        (f"Notar und Grundbuchamt ({prozent(NOTAR_GRUNDBUCH_SATZ, 1)})",
+         eur(NOTAR_GRUNDBUCH)),
+        (f"Maklerprovision ({PROVISION_HINWEIS})", eur(MAKLERPROVISION)),
+        (f"<b>Erwerbsnebenkosten</b> "
+         f"({prozent(ERWERBSNEBENKOSTEN_QUOTE, 1)} vom Kaufpreis)",
+         eur(ERWERBSNEBENKOSTEN)),
+    ]
+    hervor.append(len(zeilen) - 1)
+
     text = [
         Paragraph(
             "Die Grunderwerbsteuer liegt in Baden-Württemberg bei 5,0 % und "
@@ -566,18 +637,36 @@ def teil_kaufpreis():
             "2,0 % der obere Rand der üblichen Spanne von 1,5 bis 2,0 % "
             "angesetzt – fällt die Rechnung niedriger aus, entsteht Puffer.",
             S_TEXT),
-        Spacer(1, 7),
-        Paragraph(
-            "Die Einbauküche ist im Kaufpreis enthalten und wurde nicht als "
-            "bewegliches Inventar herausgerechnet. Würde sie im Kaufvertrag "
-            "separat ausgewiesen, entfiele darauf die Grunderwerbsteuer – bei "
-            "einem Ansatz von 25.000 € wären das rund 1.250 € weniger. Das "
-            "ist zulässig, solange der Wert realistisch bleibt.",
-            S_HINWEIS),
     ]
+    if MAKLERPROVISION:
+        text += [
+            Spacer(1, 6),
+            Paragraph(
+                f"<b>Die Käuferprovision von {eur(MAKLERPROVISION)} ist nach "
+                "der Grunderwerbsteuer der größte Nebenkostenposten.</b> Die "
+                "3,57 % entsprechen der üblichen Käuferhälfte einer "
+                "Gesamtprovision von 7,14 % und dürften damit dem seit "
+                "Dezember 2020 geltenden Bestellerprinzip genügen. Lassen Sie "
+                "sich dennoch bestätigen, dass der Verkäufer denselben Anteil "
+                "trägt: Zahlt er weniger, ist Ihre Provisionsvereinbarung "
+                "nach § 656c BGB unwirksam.", S_TEXT),
+        ]
+    if EINBAUKUECHE_WERT:
+        text += [
+            Spacer(1, 6),
+            Paragraph(
+                "Die Einbauküche ist im Kaufpreis enthalten und wurde nicht "
+                "als bewegliches Inventar herausgerechnet. Würde sie im "
+                "Kaufvertrag separat ausgewiesen, entfiele darauf die "
+                f"Grunderwerbsteuer – bei einem Ansatz von "
+                f"{eur(EINBAUKUECHE_WERT)} wären das rund "
+                f"{eur(EINBAUKUECHE_WERT * GRUNDERWERBSTEUER_SATZ)} weniger.",
+                S_HINWEIS),
+        ]
+
     return [KeepTogether([
         abschnitt("1 · Kaufpreis und Erwerbsnebenkosten"),
-        nebeneinander(tabelle, text, 0.60),
+        nebeneinander(wertetabelle(zeilen, lb, hervorheben=hervor), text, 0.60),
     ]), Spacer(1, 16)]
 
 
@@ -647,7 +736,13 @@ def teil_struktur():
     )
 
     abstand = 0.60 - BELEIHUNGSAUSLAUF
-    if abstand > 0:
+    if BELEIHUNGSAUSLAUF > 0.60:
+        beleihung = Paragraph(
+            f"Der Beleihungsauslauf liegt mit {prozent(BELEIHUNGSAUSLAUF, 1)} "
+            "über der 60-Prozent-Schwelle. Mehr Eigenkapital oder niedrigere "
+            "Nebenkosten würden Sie in die günstigere Klasse zurückholen.",
+            S_TEXT)
+    elif abstand < 0.05:
         beleihung = Paragraph(
             f"<b>Achten Sie auf die 60-Prozent-Marke.</b> Der "
             f"Beleihungsauslauf liegt bei {prozent(BELEIHUNGSAUSLAUF, 1)} und "
@@ -659,20 +754,45 @@ def teil_struktur():
             "Zinsaufschlag.", S_TEXT)
     else:
         beleihung = Paragraph(
-            f"Der Beleihungsauslauf liegt mit {prozent(BELEIHUNGSAUSLAUF, 1)} "
-            "über der 60-Prozent-Schwelle. Mehr Eigenkapital oder niedrigere "
-            "Nebenkosten würden Sie in die günstigere Klasse zurückholen.",
-            S_TEXT)
+            f"Der Beleihungsauslauf liegt bei {prozent(BELEIHUNGSAUSLAUF, 1)} "
+            "und damit weit unterhalb der 60-Prozent-Schwelle, ab der Banken "
+            "ihre besten Konditionen vergeben. Aus Sicht der Bank ist das ein "
+            "nahezu risikoloses Engagement – ein Zinsaufschlag wegen der "
+            "Beleihungshöhe ist ausgeschlossen.", S_TEXT)
 
-    text = [
-        beleihung,
-        Spacer(1, 6),
-        Paragraph(
-            "Sondertilgungen sind bewusst nicht eingerechnet. Ein Recht auf "
-            "5 % jährlich sollten Sie sich dennoch einräumen lassen: Es ist "
-            "üblicherweise kostenfrei und verschafft Ihnen Spielraum, ohne "
-            "die vereinbarte Rate zu erhöhen.", S_HINWEIS),
-    ]
+    text = [beleihung]
+
+    if 0 < DARLEHEN < MINDESTDARLEHEN:
+        text += [
+            Spacer(1, 6),
+            Paragraph(
+                f"<b>Diese Summe ist keine Baufinanzierung mehr.</b> Mit "
+                f"{eur(DARLEHEN)} liegen Sie unter der Mindestdarlehenssumme, "
+                f"die Banken üblicherweise ansetzen – meist rund "
+                f"{eur(MINDESTDARLEHEN)}. Praktisch bedeutet das: Sie kaufen "
+                "diese Wohnung bar. Die Lücke schließen Sie aus der Reserve, "
+                "über einen Ratenkredit oder indem Sie mit dem Verkäufer eine "
+                "spätere Fälligkeit vereinbaren. Die folgenden Abschnitte "
+                "rechnen die Annuität trotzdem durch, damit die Größenordnung "
+                "sichtbar bleibt – als Finanzierungskonzept taugt sie nicht.",
+                S_TEXT),
+            Spacer(1, 6),
+            Paragraph(
+                "Die eigentliche Frage lautet hier nicht, was die Rate "
+                "kostet, sondern ob es sinnvoll ist, so viel Kapital in einer "
+                "einzigen Immobilie zu binden. Ein bewusst höheres Darlehen "
+                "hält Eigenkapital liquide – bei 4,10 % Sollzins ist das "
+                "allerdings teuer erkauft.", S_HINWEIS),
+        ]
+    else:
+        text += [
+            Spacer(1, 6),
+            Paragraph(
+                "Sondertilgungen sind bewusst nicht eingerechnet. Ein Recht "
+                "auf 5 % jährlich sollten Sie sich dennoch einräumen lassen: "
+                "Es ist üblicherweise kostenfrei und verschafft Ihnen "
+                "Spielraum, ohne die vereinbarte Rate zu erhöhen.", S_HINWEIS),
+        ]
     return [KeepTogether([
         abschnitt("3 · Finanzierungsstruktur"),
         nebeneinander(tabelle, text, 0.60),
@@ -709,17 +829,23 @@ def teil_belastung():
             "den Grundsteuerwert, davon 1,3 Promille Steuermesszahl abzüglich "
             "30 % Abschlag für Wohnnutzung, multipliziert mit dem Stuttgarter "
             f"Hebesatz von 354 %. Für Ihren Anteil ergibt das überschlägig "
-            f"500 bis 600 € im Jahr; angesetzt sind "
+            f"{GRUNDSTEUER_HERLEITUNG} im Jahr; angesetzt sind "
             f"{eur(GRUNDSTEUER_JAHR)}. Den verbindlichen Betrag nennt Ihnen "
             "die Hausverwaltung.", S_TEXT),
         Spacer(1, 6),
         Paragraph(
-            "Nicht enthalten sind Strom, Internet, Hausrat- und "
-            "Haftpflichtversicherung sowie Heiz- und Warmwasserkosten, soweit "
-            "sie über das Hausgeld hinausgehen. Die Rücklage der "
+            f"<b>Rücklage:</b> {RUECKLAGE_BEGRUENDUNG} Die Rücklage der "
             "Eigentümergemeinschaft deckt nur das Gemeinschaftseigentum; für "
             "Küche, Bäder und Böden in Ihrer Wohnung sind Sie selbst "
-            "zuständig.", S_HINWEIS),
+            "zuständig.", S_TEXT),
+        Spacer(1, 6),
+        Paragraph(
+            f"Das Hausgeld entspricht {eur(HAUSGELD_MONAT / WOHNFLAECHE_QM, 2)}"
+            " je m² und Monat. Klären Sie, welche Positionen darin enthalten "
+            "sind – vor allem, ob Heizung und Warmwasser bereits abgedeckt "
+            "sind und wie hoch die darin enthaltene Instandhaltungsrücklage "
+            "ist. Nicht enthalten sind in jedem Fall Strom, Internet sowie "
+            "Hausrat- und Haftpflichtversicherung.", S_HINWEIS),
     ]
     return [KeepTogether([
         abschnitt("4 · Monatliche Belastung bei Eigennutzung"),
@@ -968,9 +1094,15 @@ def teil_puffer():
          BEREITSTELLUNGSZINSEN),
         ("Schätzkosten", "Bank verzichtet oder pauschaliert",
          SCHAETZKOSTEN - 500.0),
-        ("Einbauküche herausrechnen", "25.000 € ohne Grunderwerbsteuer",
-         25_000.0 * GRUNDERWERBSTEUER_SATZ),
     ]
+    if EINBAUKUECHE_WERT:
+        posten.append((
+            "Einbauküche herausrechnen",
+            f"{eur(EINBAUKUECHE_WERT)} ohne Grunderwerbsteuer",
+            EINBAUKUECHE_WERT * GRUNDERWERBSTEUER_SATZ))
+    # Die Kaeuferprovision ist bewusst kein Pufferposten: 3,57 % entspricht
+    # bereits der ueblichen Kaeuferhaelfte einer Gesamtprovision von 7,14 %.
+    # Eine weitere Halbierung waere kein Puffer, sondern Wunschdenken.
     # Auf ganze Euro runden, bevor summiert wird: Sonst weicht die
     # Summenzeile von der Summe der angezeigten Einzelwerte ab.
     posten = [(a, b, round(c)) for a, b, c in posten]
@@ -986,9 +1118,10 @@ def teil_puffer():
     )
 
     # Wirkung auf Rate und Quote, wenn saemtliche Puffer aufgehen
-    d_guenstig = DARLEHEN - summe
+    d_guenstig = max(DARLEHEN - summe, 0.0)
     r_guenstig = annuitaet_monatlich(d_guenstig, SOLLZINS, ANFANGSTILGUNG)
-    fest_guenstig = (r_guenstig + HAUSGELD_MONAT + 500.0 / 12.0)
+    grundsteuer_guenstig = GRUNDSTEUER_JAHR * 0.6
+    fest_guenstig = r_guenstig + HAUSGELD_MONAT + grundsteuer_guenstig / 12.0
 
     text = [
         Paragraph(
@@ -999,8 +1132,9 @@ def teil_puffer():
         Paragraph(
             f"Gehen sämtliche Puffer auf, sinkt das Darlehen auf "
             f"{eur(d_guenstig)} und die Rate auf {eur(r_guenstig, 2)}. "
-            "Zusammen mit einer Grundsteuer von 500 € im Jahr und ohne "
-            "Kontoführungsgebühr lägen die festen Kosten dann bei "
+            f"Zusammen mit einer Grundsteuer von {eur(grundsteuer_guenstig)} "
+            "im Jahr und ohne Kontoführungsgebühr lägen die festen Kosten "
+            "dann bei "
             f"{eur(fest_guenstig, 2)}"
             + (f" – eine Belastungsquote von "
                f"{prozent(fest_guenstig / NETTOEINKOMMEN_MONAT, 1)}."
@@ -1086,7 +1220,7 @@ def erzeuge_pdf(dateiname=PDF_DATEI):
         dateiname, pagesize=SEITE,
         leftMargin=RAND_SEITLICH, rightMargin=RAND_SEITLICH,
         topMargin=RAND_OBEN, bottomMargin=RAND_UNTEN,
-        title="Finanzierungsübersicht Waldburgstrasse 153b",
+        title=f"Finanzierungsübersicht {OBJEKT_ADRESSE}",
         author="Modellrechnung", subject="Immobilienfinanzierung",
     )
     rahmen = Frame(doc.leftMargin, doc.bottomMargin,
@@ -1110,7 +1244,7 @@ def erzeuge_pdf(dateiname=PDF_DATEI):
 
 def konsolenausgabe():
     print("=" * 64)
-    print("FINANZIERUNG WALDBURGSTRASSE 153B, STUTTGART-VAIHINGEN")
+    print(f"FINANZIERUNG {OBJEKT_ADRESSE.upper()}")
     print("konservativ gerechnet")
     print("=" * 64)
     print(f"Kaufpreis gesamt           {eur(KAUFPREIS_GESAMT):>18}")
